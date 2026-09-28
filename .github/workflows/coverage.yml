@@ -1,0 +1,37 @@
+name: coverage
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Generate coverage
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - no-default-features
+          - all-features
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run tests with Coverage report enabled
+        run: cargo llvm-cov test --${{ matrix.features }} --codecov --locked --output-path codecov_report.json
+
+      - name: Upload coverage report to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./codecov_report.json

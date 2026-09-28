@@ -1,0 +1,296 @@
+name: build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "30 17 * * 5" # Every Friday at 17:30 UTC
+
+env:
+  CARGO_TERM_COLOR: always
+  NPM_CONFIG_COLOR: always
+  FORCE_COLOR: 3
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # Here we check that we can run `cargo test` on modern versions of
+  # Rust. Below we check that we can build the library on an old
+  # version as well.
+  ubuntu:
+    name: Ubuntu (${{ matrix.rust }}, ${{ matrix.features.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - stable
+          - nightly
+        features:
+          - name: no default features
+            flags: --no-default-features
+          - name: all features
+            flags: --all-features
+          - name: default features
+            flags: ""
+          - name: unicode-linebreak
+            flags: --no-default-features --features unicode-linebreak
+          - name: unicode-linebreak-complex
+            flags: --no-default-features --features unicode-linebreak-complex
+          - name: unicode-width
+            flags: --no-default-features --features unicode-width
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install ${{ matrix.rust }} Rust
+        run: rustup default ${{ matrix.rust }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test with ${{ matrix.features.name }}
+        run: cargo test ${{ matrix.features.flags }}
+
+  windows:
+    name: Windows (stable, default features)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test with default features
+        run: cargo test
+
+  msrv:
+    name: Minimum supported Rust version (${{ matrix.features.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - name: no default features
+            flags: --no-default-features
+          - name: all features
+            flags: --all-features
+          - name: default features
+            flags: ""
+          - name: unicode-linebreak
+            flags: --no-default-features --features unicode-linebreak
+          - name: unicode-linebreak-complex
+            flags: --no-default-features --features unicode-linebreak-complex
+          - name: unicode-width
+            flags: --no-default-features --features unicode-width
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Find Minimum Support Rust Version
+        run: |
+          echo "msrv=$(egrep 'rust-version\s*=\s*"([0-9.]+)"' Cargo.toml | cut -d '"' -f 2)" >> "$GITHUB_ENV"
+
+      - name: Install Rust ${{ env.msrv }} (MSRV)
+        run: rustup default $msrv
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build with ${{ matrix.features.name }}
+        run: cargo build ${{ matrix.features.flags }}
+
+  no-std:
+    name: no_std support
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install thumbv7m-none-eabi target
+        run: rustup target add thumbv7m-none-eabi
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build with no default features
+        run: cargo build --no-default-features --target thumbv7m-none-eabi
+
+      - name: Build with unicode-width
+        run: cargo build --no-default-features --features unicode-width --target thumbv7m-none-eabi
+
+  # This builds benchmarks, which are not covered above.
+  build-benchmarks:
+    name: Build benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: benchmarks -> target
+
+      - name: Build all benchmarks
+        run: cargo bench --no-run
+        working-directory: benchmarks
+
+  build-documentation:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build documentation and check intra-doc links
+        env:
+          RUSTDOCFLAGS: --deny rustdoc::broken_intra_doc_links
+        run: cargo doc --all-features --no-deps
+
+  fuzz:
+    name: Fuzz test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzz-target:
+          - fill_first_fit
+          - fill_optimal_fit
+          - fill_fast_path
+          - wrap_first_fit
+          - wrap_optimal_fit
+          - wrap_optimal_fit_usize
+          - wrap_fast_path
+          - unfill
+          - refill
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install nightly Rust
+        run: rustup default nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Cache fuzz corpus
+        uses: actions/cache@v6
+        with:
+          path: fuzz/corpus/${{ matrix.fuzz-target }}
+          key: fuzz-corpus-${{ matrix.fuzz-target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.fuzz-target }}
+
+      - name: Run fuzz test
+        run: cargo fuzz run ${{ matrix.fuzz-target }} -- -max_total_time=30
+
+      - name: Minimize fuzz corpus
+        run: cargo fuzz cmin ${{ matrix.fuzz-target }}
+
+  binary-sizes:
+    name: Compute binary sizes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: examples/binary-sizes -> target
+
+      - name: Make binary size table
+        run: cargo run --example make-table
+        working-directory: examples/binary-sizes
+
+  wasm-build:
+    name: Build Wasm demo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: examples/wasm -> target
+
+      - name: Build textwrap-wasm-demo
+        run: wasm-pack build --target web
+        working-directory: examples/wasm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: examples/wasm/www/package-lock.json
+
+      - name: Install textwrap-wasm-demo-app dependencies
+        run: npm ci
+        working-directory: examples/wasm/www
+
+      - name: Bundle textwrap-wasm-demo-app
+        run: npm run build
+        working-directory: examples/wasm/www
+
+      - name: Install Playwright Browsers
+        run: npx playwright install chromium --with-deps
+        working-directory: examples/wasm/www
+
+      - name: Run Wasm smoke tests
+        run: npm test
+        working-directory: examples/wasm/www
+
+      - name: Record build info
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cat > dist/build-info.json <<EOM
+          {"date": "$(date --utc --iso-8601)", "commit": "$GITHUB_SHA"}
+          EOM
+        working-directory: examples/wasm/www
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: examples/wasm/www/dist
+
+  wasm-deploy:
+    name: Deploy Wasm demo
+    needs: wasm-build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # We use an unstable rustfmt feature and we thus need the
+      # nightly channel to enforce the formatting.
+      - name: Setup Rust nightly
+        run: rustup default nightly
+
+      - name: Install rustfmt
+        run: rustup component add rustfmt
+
+      - name: Check Formatting
+        uses: dprint/check@v2.3

@@ -1,0 +1,30 @@
+{
+  "name": "textwrap-wasm-demo-app",
+  "version": "0.1.0",
+  "description": "Textwrap WebAssembly demo application",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "vite build",
+    "start": "vite",
+    "preview": "vite preview",
+    "test": "playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mgeisler/textwrap.git"
+  },
+  "author": "Martin Geisler <martin@geisler.net>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/mgeisler/textwrap/issues"
+  },
+  "homepage": "https://github.com/mgeisler/textwrap",
+  "dependencies": {
+    "textwrap-wasm-demo": "file:../pkg"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "vite": "^8.3.0"
+  }
+}
